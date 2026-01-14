@@ -86,16 +86,19 @@ const WHATSAPP_CONFIG = { NUMBER: '5521991629472', MESSAGE: 'Olá, Lucilia! Gost
 const supabaseUrl = 'https://kzrttlhfjhaortkrnqby.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6cnR0bGhmamhhb3J0a3JucWJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNTY5OTMsImV4cCI6MjA4MzkzMjk5M30.1A6-V3tkk3hoD5iXOnLvfQpFtvUQyita3Ek1z-Mz6tU';
 
+// Hard fail check for keys
+if (!supabaseUrl || !supabaseKey) {
+  console.error("ERRO CRÍTICO: Chaves do Supabase não encontradas.");
+}
+
 // Inicialização segura do Supabase
 const supabase = (supabaseUrl && supabaseKey) 
   ? createClient(supabaseUrl, supabaseKey) 
   : null;
 
-if (!supabase) {
-  console.error("Configuração do Supabase ausente ou inválida. Algumas funcionalidades podem não estar disponíveis.");
-}
-
 const App: React.FC = () => {
+  console.log("App: Iniciando renderização do componente principal");
+  
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
   const [session, setSession] = useState<Session | null>(null);
   const [activeCategory, setActiveCategory] = useState<DeckCategory | 'Todos'>('Todos');
@@ -104,6 +107,8 @@ const App: React.FC = () => {
   const [bookingStep, setBookingStep] = useState(1);
   const [serviceConfigs, setServiceConfigs] = useState<Record<string, number>>({});
   
+  const [isLoading, setIsLoading] = useState(true); // Estado de carregamento explícito
+
   // Booking State
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -126,11 +131,44 @@ const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!supabase) return;
+    console.log("App: Rodando useEffect de inicialização");
+    
+    // Timeout de resgate: Garante que o site carregue mesmo se a conexão travar
+    const safetyTimeout = setTimeout(() => {
+      if (isLoading) {
+        console.warn("App: Safety timeout atingido. Forçando encerramento do carregamento.");
+        setIsLoading(false);
+      }
+    }, 5000);
 
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
-    fetchServiceConfigs();
+    if (!supabase) {
+      console.warn("App: Supabase não inicializado.");
+      setIsLoading(false);
+      clearTimeout(safetyTimeout);
+      return;
+    }
+
+    const init = async () => {
+      try {
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        setSession(currentSession);
+        await fetchServiceConfigs();
+        console.log("App: Inicialização concluída com sucesso.");
+      } catch (err) {
+        console.error("App: Erro crítico durante inicialização:", err);
+      } finally {
+        setIsLoading(false);
+        clearTimeout(safetyTimeout);
+      }
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log("App: Mudança de estado de autenticação detectada.");
+      setSession(session);
+    });
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -422,6 +460,35 @@ const App: React.FC = () => {
       console.error("Erro ao deletar bloqueio:", err);
     }
   };
+
+  // Log de diagnóstico visual se chaves estiverem faltando
+  if (!supabaseUrl || !supabaseKey) {
+    return (
+      <div className="min-h-screen bg-mystic-deep flex items-center justify-center p-10 text-center">
+        <div className="bg-mystic-purple/20 border border-red-500/50 p-10 rounded-3xl backdrop-blur-xl max-w-lg">
+          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+          <h1 className="text-2xl font-serif text-white mb-4">ERRO DE CONFIGURAÇÃO</h1>
+          <p className="text-mystic-lavender/60 text-sm">As chaves do Supabase não foram encontradas. Verifique as variáveis de ambiente ou o código fonte.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback de carregamento visual
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-mystic-deep flex flex-col items-center justify-center p-10 text-center stars-overlay">
+        <div className="animate-float mb-8">
+           <TarotCardIcon className="text-mystic-gold w-16 h-16 animate-pulse" />
+        </div>
+        <h1 className="text-xl font-serif text-mystic-gold uppercase tracking-[0.3em]">Conectando ao Portal...</h1>
+        <p className="text-white/30 text-xs mt-4 uppercase tracking-widest">Aguarde a abertura dos caminhos</p>
+        <div className="mt-10 w-48 h-1 bg-white/5 rounded-full overflow-hidden">
+          <div className="h-full bg-mystic-gold animate-pulse-gold w-full origin-left scale-x-0 transition-transform"></div>
+        </div>
+      </div>
+    );
+  }
 
   if (isAdmin && !session) {
     return (
