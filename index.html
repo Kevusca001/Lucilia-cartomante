@@ -1,0 +1,101 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal de Clarividência Ética</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              mystic: {
+                deep: '#0f051d',
+                purple: '#2d0a4e',
+                violet: '#4b0082',
+                lavender: '#e6e6fa',
+                gold: '#d4af37'
+              }
+            },
+            fontFamily: {
+              serif: ['Cinzel', 'serif'],
+              sans: ['Montserrat', 'sans-serif']
+            },
+            animation: {
+              'pulse-gold': 'pulse-gold 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float': 'float 6s ease-in-out infinite'
+            },
+            keyframes: {
+              'pulse-gold': {
+                '0%, 100%': { transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(212, 175, 55, 0.7)' },
+                '50%': { transform: 'scale(1.05)', boxShadow: '0 0 20px 10px rgba(212, 175, 55, 0)' }
+              },
+              'float': {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-20px)' }
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #0f051d;
+        color: #e6e6fa;
+        scroll-behavior: smooth;
+      }
+      .mystic-gradient {
+        background: linear-gradient(135deg, #0f051d 0%, #2d0a4e 50%, #0f051d 100%);
+      }
+      .card-gradient {
+        background: linear-gradient(180deg, rgba(45, 10, 78, 0.6) 0%, rgba(15, 5, 29, 0.9) 100%);
+      }
+      .stars-overlay {
+        background-image: radial-gradient(white, rgba(255,255,255,.2) 2px, transparent 40px);
+        background-size: 550px 550px;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0f051d;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2d0a4e;
+        border-radius: 10px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #d4af37;
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.3s ease-out forwards;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.0",
+    "qrcode": "https://esm.sh/qrcode@1.5.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
