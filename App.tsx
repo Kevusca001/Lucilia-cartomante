@@ -60,11 +60,13 @@ const TarotCardIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const PLACEHOLDER_IMAGE = 'https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&q=80&w=800';
+
 const SITE_DATA = {
   profile: {
     name: 'Lucilia Cartomante',
     manifesto: "Sou cartomante, oraculista e dirigente espiritual. Trabalho com o Baralho Cigano e o Baralho da Pombagira como ferramentas de clareza, consciência e tomada de decisão. Não atuo para iludir, prometer milagres ou criar dependência. Minhas leituras servem para quem está disposto a enxergar a própria verdade, assumir responsabilidade sobre as próprias escolhas e encerrar ciclos que já passaram do prazo. A espiritualidade, para mim, é prática, ética e madura. Ela orienta, mas não decide por você. Se você busca lucidez, coragem e alinhamento, seja bem-vindo.",
-    profileImage: 'https://kzrttlhfjhaortkrnqby.supabase.co/storage/v1/object/public/images-site/Imagem%20Lucilia.jpeg'
+    profileImage: 'https://kzrttlhfjhaortkrnqby.supabase.co/storage/v1/object/public/images-site/Imagem%20Lucilia.jpeg' || PLACEHOLDER_IMAGE
   },
   catalog: [
     { id: 'cigano-1', category: DeckCategory.CIGANO, title: 'Pergunta Avulsa', description: 'Uma resposta direta e objetiva para uma dúvida pontual.', price: 'R$ 20', imageUrl: 'https://kzrttlhfjhaortkrnqby.supabase.co/storage/v1/object/public/images-site/Pergunta%20avulsa.jpg' },
@@ -83,7 +85,15 @@ const WHATSAPP_CONFIG = { NUMBER: '5521991629472', MESSAGE: 'Olá, Lucilia! Gost
 
 const supabaseUrl = 'https://kzrttlhfjhaortkrnqby.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt6cnR0bGhmamhhb3J0a3JucWJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNTY5OTMsImV4cCI6MjA4MzkzMjk5M30.1A6-V3tkk3hoD5iXOnLvfQpFtvUQyita3Ek1z-Mz6tU';
-const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Inicialização segura do Supabase
+const supabase = (supabaseUrl && supabaseKey) 
+  ? createClient(supabaseUrl, supabaseKey) 
+  : null;
+
+if (!supabase) {
+  console.error("Configuração do Supabase ausente ou inválida. Algumas funcionalidades podem não estar disponíveis.");
+}
 
 const App: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(window.location.pathname === '/admin');
@@ -116,6 +126,8 @@ const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!supabase) return;
+
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
     fetchServiceConfigs();
@@ -123,21 +135,27 @@ const App: React.FC = () => {
   }, []);
 
   const fetchServiceConfigs = async () => {
-    const { data } = await supabase.from('servicos_config').select('*');
-    if (data) {
-      const configMap = data.reduce((acc, curr) => ({ ...acc, [curr.id_servico]: curr.desconto_porcentagem }), {});
-      setServiceConfigs(configMap);
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from('servicos_config').select('*');
+      if (error) throw error;
+      if (data) {
+        const configMap = (data || []).reduce((acc, curr) => ({ ...acc, [curr.id_servico]: curr.desconto_porcentagem }), {});
+        setServiceConfigs(configMap);
+      }
+    } catch (err) {
+      console.error("Falha ao buscar configurações de serviço:", err);
     }
   };
 
   const calculatePrice = (basePrice: string, id: string) => {
-    const numeric = parseFloat(basePrice.replace(/[^0-9,.]/g, '').replace(',', '.'));
+    const numeric = parseFloat((basePrice || '0').replace(/[^0-9,.]/g, '').replace(',', '.')) || 0;
     const discount = serviceConfigs[id] || 0;
     if (discount <= 0) return { original: basePrice, current: basePrice, numeric: numeric, hasDiscount: false };
     const current = numeric * (1 - discount / 100);
     return {
-      original: basePrice,
-      current: `R$ ${current.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+      original: basePrice || 'R$ 0,00',
+      current: `R$ ${(current || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
       numeric: current,
       hasDiscount: true,
       percent: discount
@@ -146,15 +164,24 @@ const App: React.FC = () => {
 
   const fetchOccupiedSlots = async (date: string) => {
     const baseSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+    if (!supabase) {
+      setAvailableSlots(baseSlots.map(s => ({ time: s, available: true })));
+      return;
+    }
+
     try {
-      // CORREÇÃO: Garantindo que status 'cancelado' não bloqueie a agenda (neq 'cancelado')
-      const { data: booked } = await supabase
+      const { data: booked, error: bookedError } = await supabase
         .from('agendamentos')
         .select('hora')
         .eq('data', date)
         .neq('status', 'cancelado');
-        
-      const { data: blocked } = await supabase.from('bloqueios').select('hora').eq('data', date);
+      
+      const { data: blocked, error: blockedError } = await supabase
+        .from('bloqueios')
+        .select('hora')
+        .eq('data', date);
+      
+      if (bookedError || blockedError) throw new Error("Erro na consulta de horários");
       
       const busyTimes = new Set([...(booked?.map(b => b.hora) || []), ...(blocked?.map(b => b.hora) || [])]);
       const isDayBlocked = blocked?.some(b => b.hora === null);
@@ -164,6 +191,7 @@ const App: React.FC = () => {
         available: !isDayBlocked && !busyTimes.has(s)
       })));
     } catch (e) {
+      console.error("Erro ao carregar slots ocupados:", e);
       setAvailableSlots(baseSlots.map(s => ({ time: s, available: true })));
     }
   };
@@ -174,27 +202,31 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (bookingStep === 3 && selectedService) {
-      const pricing = calculatePrice(selectedService.price, selectedService.id);
-      const pix = new PixPayload(
-        PIX_CONFIG.KEY,
-        PIX_CONFIG.NAME,
-        PIX_CONFIG.CITY,
-        `AG${Date.now().toString().slice(-8)}`,
-        pricing.numeric
-      );
-      
-      const payload = pix.generate();
-      setPixPayloadCode(payload);
+      try {
+        const pricing = calculatePrice(selectedService.price, selectedService.id);
+        const pix = new PixPayload(
+          PIX_CONFIG.KEY,
+          PIX_CONFIG.NAME,
+          PIX_CONFIG.CITY,
+          `AG${Date.now().toString().slice(-8)}`,
+          pricing.numeric
+        );
+        
+        const payload = pix.generate();
+        setPixPayloadCode(payload);
 
-      QRCode.toDataURL(payload, {
-        width: 400,
-        margin: 2,
-        color: { dark: '#0f051d', light: '#ffffff' },
-      }).then(url => {
-        setQrCodeDataUrl(url);
-      }).catch(err => {
-        console.error("Erro ao gerar QR Code:", err);
-      });
+        QRCode.toDataURL(payload, {
+          width: 400,
+          margin: 2,
+          color: { dark: '#0f051d', light: '#ffffff' },
+        }).then(url => {
+          setQrCodeDataUrl(url);
+        }).catch(err => {
+          console.error("Erro ao gerar QR Code:", err);
+        });
+      } catch (err) {
+        console.error("Falha no fluxo de geração de PIX:", err);
+      }
     }
   }, [bookingStep, selectedService]);
 
@@ -207,24 +239,29 @@ const App: React.FC = () => {
   };
 
   const handleConfirmPix = async () => {
-    if (!selectedService || !selectedDate || !selectedTime) return;
+    if (!selectedService || !selectedDate || !selectedTime || !supabase) return;
     setIsSubmitting(true);
     try {
       const { error } = await supabase.from('agendamentos').insert([{
         data: selectedDate,
         hora: selectedTime,
-        nome_cliente: formData.name,
-        telefone: formData.phone,
-        servico: selectedService.title,
+        nome_cliente: formData.name || 'Cliente',
+        telefone: formData.phone || '',
+        servico: selectedService.title || 'Consulta',
         status: 'confirmed' 
       }]);
-      if (!error) setHasConfirmedPix(true);
+      if (error) throw error;
+      setHasConfirmedPix(true);
+    } catch (err) {
+      console.error("Falha ao registrar agendamento:", err);
+      alert("Houve um erro ao processar seu agendamento. Por favor, tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleCopyPix = () => {
+    if (!pixPayloadCode) return;
     navigator.clipboard.writeText(pixPayloadCode);
     setCopyFeedback(true);
     setTimeout(() => setCopyFeedback(false), 2000);
@@ -232,101 +269,110 @@ const App: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword });
-    if (error) alert('Falha no login');
+    if (error) alert('Falha no login: ' + error.message);
   };
 
   const fetchDashboardData = async () => {
-    const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
-    
-    const firstDayPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-    const lastDayPrev = new Date(now.getFullYear(), now.getMonth(), 0).toISOString();
-
-    const fetchRev = async (start: string, end: string) => {
-      const { data } = await supabase.from('agendamentos')
-        .select('servico')
-        .eq('status', 'confirmed')
-        .gte('data', start.split('T')[0])
-        .lte('data', end.split('T')[0]);
+    if (!supabase) return;
+    try {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
       
-      return (data || []).reduce((acc, curr) => {
-        const service = SITE_DATA.catalog.find(s => s.title === curr.servico);
-        const priceStr = service?.price.replace(/[^0-9,.]/g, '').replace(',', '.') || '0';
-        const price = parseFloat(priceStr);
-        return acc + price;
-      }, 0);
-    };
+      const firstDayPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+      const lastDayPrev = new Date(now.getFullYear(), now.getMonth(), 0).toISOString();
 
-    const thisMonth = await fetchRev(firstDay, lastDay);
-    const prevMonth = await fetchRev(firstDayPrev, lastDayPrev);
-    const diff = prevMonth === 0 ? 100 : ((thisMonth - prevMonth) / prevMonth) * 100;
-    
-    setDashboardData({ revenueThisMonth: thisMonth, diffPercent: diff });
+      const fetchRev = async (start: string, end: string) => {
+        const { data, error } = await supabase.from('agendamentos')
+          .select('servico')
+          .eq('status', 'confirmed')
+          .gte('data', start.split('T')[0])
+          .lte('data', end.split('T')[0]);
+        
+        if (error) throw error;
+        
+        return (data || []).reduce((acc, curr) => {
+          const service = SITE_DATA.catalog.find(s => s.title === curr.servico);
+          const priceStr = (service?.price || '0').replace(/[^0-9,.]/g, '').replace(',', '.') || '0';
+          const price = parseFloat(priceStr);
+          return acc + price;
+        }, 0);
+      };
 
-    const { data: future } = await supabase
-      .from('agendamentos')
-      .select('*')
-      .eq('status', 'confirmed')
-      .gte('data', now.toISOString().split('T')[0])
-      .order('data', { ascending: true })
-      .order('hora', { ascending: true });
-    
-    setFutureAppointments(future || []);
+      const thisMonth = await fetchRev(firstDay, lastDay);
+      const prevMonth = await fetchRev(firstDayPrev, lastDayPrev);
+      const diff = prevMonth === 0 ? 100 : ((thisMonth - prevMonth) / prevMonth) * 100;
+      
+      setDashboardData({ revenueThisMonth: thisMonth, diffPercent: diff });
+
+      const { data: future, error: futureError } = await supabase
+        .from('agendamentos')
+        .select('*')
+        .eq('status', 'confirmed')
+        .gte('data', now.toISOString().split('T')[0])
+        .order('data', { ascending: true })
+        .order('hora', { ascending: true });
+      
+      if (futureError) throw futureError;
+      setFutureAppointments(future || []);
+    } catch (err) {
+      console.error("Erro ao buscar dados do dashboard:", err);
+    }
   };
 
-  // CORREÇÃO: Tratamento de erro explícito com alert e trava de segurança
   const handleConfirmCancel = async (booking: Booking) => {
-    if (!booking.id) return;
+    if (!booking.id || !supabase) return;
     setIsSubmitting(true);
     try {
-      // 1. Capture o Erro do Supabase
       const { error } = await supabase
         .from('agendamentos')
         .update({ status: 'cancelado' })
         .eq('id', booking.id);
 
-      // 2. Trava de Segurança: SE houver error
       if (error) {
-        console.error("Erro ao cancelar no Supabase:", error);
         alert('Erro ao cancelar: ' + error.message);
         setIsSubmitting(false);
-        return; // PARE a execução
+        return;
       }
 
-      // 3. Sucesso: Apenas se !error
-      // ATUALIZAÇÃO IMEDIATA DO ESTADO LOCAL
-      setFutureAppointments((prev) => prev.filter(app => app.id !== booking.id));
-      
-      // Feedback visual
+      setFutureAppointments((prev) => (prev || []).filter(app => app.id !== booking.id));
       setToastMessage("Agendamento cancelado e horário liberado!");
       setTimeout(() => setToastMessage(null), 4000);
 
-      // Recalcula totais
       fetchDashboardData();
 
-      // Integração WhatsApp
-      const formattedDate = booking.data.split('-').reverse().join('/');
-      const message = `Olá ${booking.nome_cliente}, infelizmente precisei cancelar seu agendamento de ${booking.servico} marcado para o dia ${formattedDate} às ${booking.hora} por motivos de força maior. Por favor, entre em contato para reagendarmos ou para o reembolso.`;
+      const formattedDate = (booking.data || '').split('-').reverse().join('/');
+      const message = `Olá ${booking.nome_cliente || 'Cliente'}, infelizmente precisei cancelar seu agendamento de ${booking.servico || 'Consulta'} marcado para o dia ${formattedDate} às ${booking.hora || ''} por motivos de força maior. Por favor, entre em contato para reagendarmos ou para o reembolso.`;
       
-      const phone = booking.telefone.replace(/\D/g, '');
-      const cleanPhone = phone.startsWith('55') ? phone : '55' + phone;
-      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
-      
-      window.open(waUrl, '_blank');
+      const phone = (booking.telefone || '').replace(/\D/g, '');
+      if (phone) {
+        const cleanPhone = phone.startsWith('55') ? phone : '55' + phone;
+        const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+        window.open(waUrl, '_blank');
+      }
       setConfirmingCancelId(null);
     } catch (err: any) {
-      console.error("Erro inesperado no fluxo de cancelamento:", err);
-      alert('Erro inesperado: ' + (err.message || 'Ocorreu um problema desconhecido.'));
+      console.error("Erro crítico no fluxo de cancelamento:", err);
+      alert('Erro inesperado ao processar cancelamento.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const fetchBloqueios = async () => {
-    const { data } = await supabase.from('bloqueios').select('*').gte('data', new Date().toISOString().split('T')[0]).order('data', { ascending: true });
-    setBloqueios(data || []);
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from('bloqueios')
+        .select('*')
+        .gte('data', new Date().toISOString().split('T')[0])
+        .order('data', { ascending: true });
+      if (error) throw error;
+      setBloqueios(data || []);
+    } catch (err) {
+      console.error("Erro ao buscar bloqueios:", err);
+    }
   };
 
   useEffect(() => {
@@ -343,23 +389,38 @@ const App: React.FC = () => {
   };
 
   const handleSavePromo = async (id: string, value: number) => {
-    await supabase.from('servicos_config').upsert({ id_servico: id, desconto_porcentagem: value });
-    fetchServiceConfigs();
+    if (!supabase) return;
+    try {
+      await supabase.from('servicos_config').upsert({ id_servico: id, desconto_porcentagem: value });
+      fetchServiceConfigs();
+    } catch (err) {
+      console.error("Erro ao salvar promoção:", err);
+    }
   };
 
   const handleAddBloqueio = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabase) return;
     const form = e.target as HTMLFormElement;
     const data = (form.elements.namedItem('date') as HTMLInputElement).value;
     const hora = (form.elements.namedItem('time') as HTMLInputElement).value || null;
-    await supabase.from('bloqueios').insert([{ data, hora }]);
-    fetchBloqueios();
-    form.reset();
+    try {
+      await supabase.from('bloqueios').insert([{ data, hora }]);
+      fetchBloqueios();
+      form.reset();
+    } catch (err) {
+      console.error("Erro ao adicionar bloqueio:", err);
+    }
   };
 
   const deleteBloqueio = async (id: string) => {
-    await supabase.from('bloqueios').delete().eq('id', id);
-    fetchBloqueios();
+    if (!supabase) return;
+    try {
+      await supabase.from('bloqueios').delete().eq('id', id);
+      fetchBloqueios();
+    } catch (err) {
+      console.error("Erro ao deletar bloqueio:", err);
+    }
   };
 
   if (isAdmin && !session) {
@@ -392,7 +453,6 @@ const App: React.FC = () => {
   if (isAdmin && session) {
     return (
       <div className="min-h-screen bg-mystic-deep text-white flex flex-col md:flex-row relative">
-        {/* Toast Notification */}
         {toastMessage && (
           <div className="fixed bottom-10 right-10 z-[2000] animate-fade-in">
             <div className="bg-mystic-gold text-mystic-deep p-6 rounded-3xl shadow-2xl flex items-center gap-4 border-2 border-white/20">
@@ -403,7 +463,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Sidebar */}
         <div className="w-full md:w-80 bg-mystic-purple/10 border-r border-white/5 p-8 flex flex-col gap-10">
           <div className="flex items-center gap-4">
             <TarotCardIcon className="text-mystic-gold w-8 h-8" />
@@ -421,14 +480,13 @@ const App: React.FC = () => {
             </button>
           </nav>
           <div className="mt-auto flex flex-col gap-4">
-            <button onClick={() => supabase.auth.signOut()} className="flex items-center gap-4 p-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all">
+            <button onClick={() => supabase?.auth.signOut()} className="flex items-center gap-4 p-4 text-red-400 hover:bg-red-500/10 rounded-2xl transition-all">
               <LogOut size={20} /> Sair
             </button>
             <button onClick={toggleAdmin} className="text-xs text-center text-white/30 hover:text-white uppercase tracking-widest">Ver site principal</button>
           </div>
         </div>
 
-        {/* Content */}
         <div className="flex-grow p-6 md:p-12 overflow-y-auto">
           {adminTab === 'dashboard' && (
             <div className="max-w-4xl space-y-12 animate-fade-in">
@@ -440,35 +498,34 @@ const App: React.FC = () => {
                 <div className="bg-white/5 p-8 rounded-3xl border border-white/10 space-y-4">
                   <span className="text-xs uppercase tracking-widest text-white/40 font-bold">Faturamento (Mês)</span>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-serif">R$ {dashboardData.revenueThisMonth.toLocaleString('pt-BR')}</span>
+                    <span className="text-4xl font-serif">R$ {(dashboardData.revenueThisMonth || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-bold ${dashboardData.diffPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {dashboardData.diffPercent >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                    {Math.abs(dashboardData.diffPercent).toFixed(1)}% vs mês passado
+                    {Math.abs(dashboardData.diffPercent || 0).toFixed(1)}% vs mês passado
                   </div>
                 </div>
               </div>
 
-              {/* LISTAGEM DE AGENDAMENTOS FUTUROS (CANCELAMENTO COM UI DE CONFIRMAÇÃO) */}
               <div className="space-y-6 pt-10">
                 <h3 className="font-serif text-2xl uppercase tracking-widest text-mystic-gold">Próximos Agendamentos</h3>
                 <div className="grid gap-4">
-                  {futureAppointments.length === 0 && <p className="text-white/20 italic">Sem consultas agendadas para os próximos dias.</p>}
-                  {futureAppointments.map(app => (
+                  {(futureAppointments || []).length === 0 && <p className="text-white/20 italic">Sem consultas agendadas para os próximos dias.</p>}
+                  {(futureAppointments || []).map(app => (
                     <div key={app.id} className="bg-white/5 border border-white/5 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 hover:border-white/20 transition-all">
                       <div className="flex items-center gap-6 w-full">
                         <div className="w-14 h-14 rounded-2xl bg-mystic-gold/10 flex flex-col items-center justify-center border border-mystic-gold/20 shrink-0">
-                          <span className="text-[10px] font-bold text-mystic-gold">{app.data.split('-')[2]}</span>
+                          <span className="text-[10px] font-bold text-mystic-gold">{(app.data || '').split('-')[2]}</span>
                           <span className="text-[10px] uppercase font-bold text-white/50">{app.hora}</span>
                         </div>
                         <div className="flex-grow">
-                          <h4 className="font-bold text-white text-lg">{app.nome_cliente}</h4>
-                          <p className="text-xs text-mystic-lavender/40 uppercase tracking-widest font-semibold">{app.servico}</p>
+                          <h4 className="font-bold text-white text-lg">{app.nome_cliente || 'Cliente'}</h4>
+                          <p className="text-xs text-mystic-lavender/40 uppercase tracking-widest font-semibold">{app.servico || 'Consulta'}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 w-full md:w-auto shrink-0">
                          <a 
-                          href={`https://wa.me/${app.telefone.replace(/\D/g, '')}`} 
+                          href={`https://wa.me/${(app.telefone || '').replace(/\D/g, '')}`} 
                           target="_blank" 
                           className="p-4 rounded-xl bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-all border border-green-500/20 flex items-center justify-center"
                         >
@@ -532,13 +589,13 @@ const App: React.FC = () => {
                 <div className="space-y-6">
                   <h3 className="font-bold uppercase text-xs tracking-widest text-white/40">Bloqueios Ativos</h3>
                   <div className="space-y-2">
-                    {bloqueios.length === 0 && <p className="text-white/20 italic">Nenhum bloqueio futuro.</p>}
-                    {bloqueios.map(b => (
+                    {(bloqueios || []).length === 0 && <p className="text-white/20 italic">Nenhum bloqueio futuro.</p>}
+                    {(bloqueios || []).map(b => (
                       <div key={b.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
                         <div className="flex items-center gap-4">
                           <Ban size={16} className="text-red-400" />
                           <div>
-                            <p className="text-sm font-bold">{new Date(b.data + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+                            <p className="text-sm font-bold">{new Date((b.data || '') + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
                             <p className="text-[10px] uppercase text-white/40">{b.hora || 'Dia Todo'}</p>
                           </div>
                         </div>
@@ -558,13 +615,13 @@ const App: React.FC = () => {
                 <p className="text-white/40">Aplique descontos em massa no catálogo.</p>
               </header>
               <div className="grid gap-4">
-                {SITE_DATA.catalog.map(service => (
+                {(SITE_DATA.catalog || []).map(service => (
                   <div key={service.id} className="bg-white/5 p-6 rounded-3xl border border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <img src={service.imageUrl} className="w-12 h-12 rounded-xl object-cover grayscale opacity-50" />
+                      <img src={service.imageUrl || PLACEHOLDER_IMAGE} className="w-12 h-12 rounded-xl object-cover grayscale opacity-50" />
                       <div>
-                        <h4 className="font-bold text-sm">{service.title}</h4>
-                        <p className="text-[10px] uppercase text-white/40">{service.price}</p>
+                        <h4 className="font-bold text-sm">{service.title || 'Consulta'}</h4>
+                        <p className="text-[10px] uppercase text-white/40">{service.price || 'R$ 0'}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -593,20 +650,18 @@ const App: React.FC = () => {
     <div className="min-h-screen font-sans overflow-x-hidden selection:bg-mystic-gold selection:text-mystic-deep bg-mystic-deep text-white">
       <div className="fixed inset-0 pointer-events-none z-0 stars-overlay opacity-30"></div>
       
-      {/* WhatsApp FAB */}
       <a 
         href={`https://wa.me/${WHATSAPP_CONFIG.NUMBER}?text=${encodeURIComponent(WHATSAPP_CONFIG.MESSAGE)}`}
         target="_blank" rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-[1000] w-14 h-14 md:w-16 md:h-16 bg-[#25D366] text-white rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 border-2 border-mystic-gold/10 animate-pulse-gold"
       >
-        <svg viewBox="0 0 24 24" className="w-7 h-7 md:w-8 md:h-8 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.94 3.659 1.437 5.634 1.437h.005c6.558 0 11.894-5.335 11.897-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        <svg viewBox="0 0 24 24" className="w-7 h-7 md:w-8 md:h-8 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.94 3.659 1.437 5.634 1.437h.005c6.558 0 11.894-5.335 11.897-11.893a11.821 11.821(0 00-3.48-8.413z"/></svg>
       </a>
 
-      {/* Header */}
       <header className="fixed top-0 left-0 w-full z-[999] px-6 py-6 md:py-8 flex justify-between items-center bg-mystic-deep/90 backdrop-blur-lg border-b border-purple-900/40">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <TarotCardIcon className="text-mystic-gold w-6 h-6" />
-          <h1 className="font-serif text-xl md:text-2xl tracking-widest uppercase text-mystic-gold">{SITE_DATA.profile.name}</h1>
+          <h1 className="font-serif text-xl md:text-2xl tracking-widest uppercase text-mystic-gold">{SITE_DATA.profile.name || 'Portal Místico'}</h1>
         </div>
         <nav className="hidden md:flex gap-8 text-sm uppercase tracking-widest font-semibold">
           <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="hover:text-mystic-gold transition-colors text-white">Sobre</button>
@@ -616,17 +671,16 @@ const App: React.FC = () => {
         <button onClick={() => document.getElementById('leituras')?.scrollIntoView({ behavior: 'smooth' })} className="bg-mystic-gold/10 border border-mystic-gold text-mystic-gold px-4 py-2 text-xs uppercase tracking-widest hover:bg-mystic-gold hover:text-mystic-deep transition-all">Agendar</button>
       </header>
 
-      {/* Hero Section */}
       <section className="relative z-10 min-h-screen flex flex-col items-center justify-center px-6 pt-32 pb-20">
         <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
           <div className="relative group animate-float">
             <div className="absolute -inset-4 bg-mystic-gold/20 rounded-full blur-3xl opacity-50 group-hover:opacity-100 transition duration-1000"></div>
-            <img src={SITE_DATA.profile.profileImage} alt={SITE_DATA.profile.name} className="relative rounded-3xl grayscale hover:grayscale-0 transition-all duration-700 border border-mystic-gold/30 shadow-2xl w-full" />
+            <img src={SITE_DATA.profile.profileImage || PLACEHOLDER_IMAGE} alt={SITE_DATA.profile.name || 'Perfil'} className="relative rounded-3xl grayscale hover:grayscale-0 transition-all duration-700 border border-mystic-gold/30 shadow-2xl w-full" />
           </div>
           <div className="space-y-8">
             <h2 className="font-serif text-4xl md:text-6xl text-white tracking-widest uppercase">O caminho é claro</h2>
             <div className="p-8 bg-mystic-purple/20 border-l-4 border-mystic-gold backdrop-blur-md rounded-r-3xl">
-              <p className="text-lg leading-relaxed text-mystic-lavender font-light italic">{SITE_DATA.profile.manifesto}</p>
+              <p className="text-lg leading-relaxed text-mystic-lavender font-light italic">{SITE_DATA.profile.manifesto || ''}</p>
             </div>
             <div className="flex flex-wrap gap-4 pt-4">
               <div className="flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10 text-[10px] uppercase tracking-widest"><ShieldCheck className="w-4 h-4 text-mystic-gold" /> Ética Profissional</div>
@@ -640,7 +694,6 @@ const App: React.FC = () => {
         </button>
       </section>
 
-      {/* Rules Section */}
       <section id="avisos" className="relative z-10 py-24 px-6 bg-mystic-deep">
         <div className="max-w-4xl mx-auto space-y-20">
           <div className="text-center space-y-8 animate-fade-in">
@@ -673,7 +726,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Services Section */}
       <section id="leituras" className="relative z-10 py-32 px-6 bg-mystic-deep/80">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16 space-y-4">
@@ -686,20 +738,20 @@ const App: React.FC = () => {
             ))}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {SITE_DATA.catalog.filter(s => activeCategory === 'Todos' || s.category === activeCategory).map(service => {
+            {(SITE_DATA.catalog || []).filter(s => activeCategory === 'Todos' || s.category === activeCategory).map(service => {
               const pricing = calculatePrice(service.price, service.id);
               return (
                 <div key={service.id} className="group card-gradient border border-white/5 rounded-[40px] overflow-hidden hover:border-mystic-gold/40 transition-all flex flex-col shadow-2xl h-full">
                   <div className="relative h-72 overflow-hidden">
-                    <img src={service.imageUrl} alt={service.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000 opacity-60 group-hover:opacity-90 grayscale group-hover:grayscale-0" />
+                    <img src={service.imageUrl || PLACEHOLDER_IMAGE} alt={service.title || 'Consulta'} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000 opacity-60 group-hover:opacity-90 grayscale group-hover:grayscale-0" />
                     {pricing.hasDiscount && (
                       <div className="absolute top-6 right-6 bg-red-500 text-white font-bold text-[10px] uppercase tracking-tighter px-4 py-2 rounded-full shadow-lg">-{pricing.percent}% OFF</div>
                     )}
                     <div className="absolute bottom-6 left-6"><span className="bg-black/60 backdrop-blur-md text-white text-[9px] font-bold uppercase tracking-[0.2em] px-4 py-2 rounded-full border border-white/10">{service.category}</span></div>
                   </div>
                   <div className="p-10 flex-grow flex flex-col gap-6">
-                    <h4 className="font-serif text-2xl text-white group-hover:text-mystic-gold transition-colors">{service.title}</h4>
-                    <p className="text-sm text-mystic-lavender/60 leading-relaxed">{service.description}</p>
+                    <h4 className="font-serif text-2xl text-white group-hover:text-mystic-gold transition-colors">{service.title || 'Leitura Oracular'}</h4>
+                    <p className="text-sm text-mystic-lavender/60 leading-relaxed">{service.description || ''}</p>
                     <div className="mt-auto pt-6 border-t border-white/5 flex items-center justify-between">
                       <div className="flex flex-col">
                         {pricing.hasDiscount && <span className="text-xs text-white/30 line-through mb-1">{pricing.original}</span>}
@@ -715,7 +767,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Booking Modal (Refined) */}
       {isModalOpen && selectedService && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-mystic-deep/90 backdrop-blur-md" onClick={() => setIsModalOpen(false)}></div>
@@ -723,7 +774,7 @@ const App: React.FC = () => {
             <div className="p-10 md:p-16 space-y-10">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
-                  <h4 className="font-serif text-3xl text-white">{selectedService.title}</h4>
+                  <h4 className="font-serif text-3xl text-white">{selectedService.title || 'Consulta'}</h4>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-mystic-gold font-bold">Reserva Online • Passo {bookingStep} de 3</p>
                 </div>
                 <button onClick={() => setIsModalOpen(false)} className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-red-500/20 transition-colors"><X size={18} /></button>
@@ -748,7 +799,7 @@ const App: React.FC = () => {
                   <div className="space-y-4">
                     <label className="text-[10px] uppercase tracking-widest text-white/50 font-bold ml-4">2. Horário Disponível</label>
                     <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                      {availableSlots.map(slot => (
+                      {(availableSlots || []).map(slot => (
                         <button key={slot.time} disabled={!slot.available} onClick={() => setSelectedTime(slot.time)} className={`p-4 rounded-xl border text-[10px] transition-all ${!slot.available ? 'opacity-10 cursor-not-allowed border-transparent' : selectedTime === slot.time ? 'bg-mystic-gold border-mystic-gold text-mystic-deep font-bold' : 'border-white/5 hover:border-white/20'}`}>
                           {slot.time}
                         </button>
@@ -778,7 +829,7 @@ const App: React.FC = () => {
                       <div className="p-8 bg-black/40 rounded-[30px] border border-white/5 space-y-4 w-full">
                         <h5 className="font-serif text-2xl text-white">Finalizar Agendamento</h5>
                         <div className="flex justify-center gap-6 text-[10px] uppercase tracking-widest text-mystic-gold font-bold">
-                          <span>{selectedDate.split('-').reverse().join('/')}</span>
+                          <span>{(selectedDate || '').split('-').reverse().join('/')}</span>
                           <span>{selectedTime}</span>
                         </div>
                         <p className="text-white font-serif text-xl">{calculatePrice(selectedService.price, selectedService.id).current}</p>
@@ -814,7 +865,7 @@ const App: React.FC = () => {
                       <div className="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center border border-green-500/50 mx-auto"><CheckCircle2 size={40} className="text-green-500" /></div>
                       <h3 className="font-serif text-3xl">Sucesso!</h3>
                       <p className="text-mystic-lavender/60 text-sm">Agendamento registrado. Clique abaixo para nos enviar o comprovante.</p>
-                      <button onClick={() => window.open(`https://wa.me/${WHATSAPP_CONFIG.NUMBER}?text=${encodeURIComponent(`Olá! Me chamo ${formData.name}. Fiz o Pix para ${selectedService.title} dia ${selectedDate.split('-').reverse().join('/')} às ${selectedTime}. Segue comprovante.`)}`, '_blank')} className="w-full bg-[#25D366] text-white p-6 rounded-2xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-3"><MessageCircle /> Enviar Comprovante</button>
+                      <button onClick={() => window.open(`https://wa.me/${WHATSAPP_CONFIG.NUMBER}?text=${encodeURIComponent(`Olá! Me chamo ${formData.name || 'Cliente'}. Fiz o Pix para ${selectedService.title || 'Consulta'} dia ${(selectedDate || '').split('-').reverse().join('/')} às ${selectedTime || ''}. Segue comprovante.`)}`, '_blank')} className="w-full bg-[#25D366] text-white p-6 rounded-2xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-3"><MessageCircle /> Enviar Comprovante</button>
                     </div>
                   )}
                 </div>
@@ -837,13 +888,12 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Footer */}
       <footer className="relative z-10 py-24 px-6 bg-black/80 border-t border-white/5">
         <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-16">
           <div className="space-y-8">
             <div className="flex items-center gap-3">
               <TarotCardIcon className="text-mystic-gold w-8 h-8" />
-              <h1 className="font-serif text-2xl tracking-widest uppercase text-mystic-gold">{SITE_DATA.profile.name}</h1>
+              <h1 className="font-serif text-2xl tracking-widest uppercase text-mystic-gold">{SITE_DATA.profile.name || 'Portal Místico'}</h1>
             </div>
             <p className="text-sm text-mystic-lavender/30 leading-relaxed max-w-sm">Clareza, ética e ancestralidade para sua jornada de autoconhecimento.</p>
           </div>
