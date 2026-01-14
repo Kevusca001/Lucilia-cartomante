@@ -44,7 +44,7 @@ export const SERVICES: ServiceItem[] = [
     category: DeckCategory.CIGANO,
     // Fix: Changed 'name' to 'title' to match ServiceItem interface
     title: 'Caminho Afetivo',
-    description: 'O que elx sente por mim? + Como devo agir? (Sessão de 15 minutos)',
+    description: 'O que Ele(a) sente por mim? + Como devo agir? (Sessão de 15 minutos)',
     price: 'R$ 50',
     imageUrl: 'https://picsum.photos/seed/cigano5/400/300'
   },
@@ -102,7 +102,7 @@ export const SERVICES: ServiceItem[] = [
     category: DeckCategory.EXU,
     // Fix: Changed 'name' to 'title' to match ServiceItem interface
     title: 'Sentimento & Ação',
-    description: 'O que elx sente? + Como devo agir? (Sessão de 15 minutos)',
+    description: 'O que Ele(a) sente? + Como devo agir? (Sessão de 15 minutos)',
     price: 'R$ 60',
     imageUrl: 'https://picsum.photos/seed/exu5/400/300'
   },
