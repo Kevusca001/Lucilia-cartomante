@@ -6,6 +6,8 @@ export interface ServiceItem {
   price: string;
   category: string;
   imageUrl: string;
+  discount: number;
+  created_at?: string;
 }
 
 export interface ServiceConfig {
